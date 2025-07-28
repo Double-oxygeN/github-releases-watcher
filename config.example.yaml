@@ -1,0 +1,15 @@
+repos:
+  - "microsoft/vscode"
+  - "facebook/react"
+
+mail:
+  host: "your.smtp.host"
+  port: 587
+  secure: false # Set to true if your SMTP server uses SSL/TLS
+  auth:
+    user: "your-email@example.com"
+    pass: "your-email-password"
+  from: "your-email@example.com"
+  to: "recipient-email@example.com"
+
+jsonFilePath: data/releases.json
