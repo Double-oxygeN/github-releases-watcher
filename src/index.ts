@@ -7,19 +7,21 @@ import Parser from 'rss-parser';
 
 const CONFIG_PATH = process.env.CONFIG_PATH ?? 'config.yaml';
 
+interface MailOptions {
+  host: string;
+  port: number;
+  secure: boolean;
+  auth: {
+    user: string;
+    pass: string;
+  };
+  from: string;
+  to: string;
+}
+
 interface Config {
   repos: string[];
-  mail: {
-    host: string;
-    port: number;
-    secure: boolean;
-    auth: {
-      user: string;
-      pass: string;
-    };
-    from: string;
-    to: string;
-  };
+  mail: MailOptions;
   jsonFilePath: string;
 }
 
@@ -36,6 +38,33 @@ interface ReleasesData {
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return typeof error === 'object' && error !== null && 'code' in error;
+}
+
+function isMailOptions(obj: unknown): obj is MailOptions {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const mailOpts = obj as Partial<MailOptions>;
+  return (
+    typeof mailOpts.host === 'string' &&
+    typeof mailOpts.port === 'number' &&
+    typeof mailOpts.secure === 'boolean' &&
+    typeof mailOpts.auth === 'object' &&
+    mailOpts.auth !== null &&
+    typeof mailOpts.auth.user === 'string' &&
+    typeof mailOpts.auth.pass === 'string' &&
+    typeof mailOpts.from === 'string' &&
+    typeof mailOpts.to === 'string'
+  );
+}
+
+function isConfig(obj: unknown): obj is Config {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const config = obj as Partial<Config>;
+  return (
+    Array.isArray(config.repos) &&
+    config.repos.every(repo => typeof repo === 'string') &&
+    isMailOptions(config.mail) &&
+    typeof config.jsonFilePath === 'string'
+  );
 }
 
 async function readReleasesData(filePath: string): Promise<ReleasesData> {
@@ -55,39 +84,55 @@ async function writeReleasesData(filePath: string, data: ReleasesData): Promise<
 }
 
 async function main() {
-  const config = yaml.parse(await fs.readFile(CONFIG_PATH, 'utf8')) as Config;
-
-  // Ensure the directory for the JSON file exists
-  const jsonDir = path.dirname(config.jsonFilePath);
-  await fs.mkdir(jsonDir, { recursive: true });
-
-  const releasesData = await readReleasesData(config.jsonFilePath);
-
-  for (const repo of config.repos) {
-    try {
-      const url = `https://github.com/${repo}/releases.atom`;
-      const response = await axios.get(url);
-      const releases = await parseRss(response.data);
-
-      // Sort releases by published date in descending order (newest first)
-      releases.sort((a, b) => new Date(b.published).getTime() - new Date(a.published).getTime());
-
-      // Process only the latest release
-      if (releases.length > 0) {
-        const latestRelease = releases[0];
-        // Only update if the latest release is different from the one already stored
-        if (!releasesData[repo] || releasesData[repo].id !== latestRelease.id) {
-          releasesData[repo] = latestRelease;
-          await sendNotification(config, repo, latestRelease);
-        }
-      }
-    } catch (error) {
-      console.error(`Error processing repo ${repo}:`, error);
+  try {
+    const configContent = await fs.readFile(CONFIG_PATH, 'utf8');
+    const parsedConfig = yaml.parse(configContent);
+    if (!isConfig(parsedConfig)) {
+      throw new Error('Invalid YAML format. Please ensure all required fields are present and correctly typed.');
     }
-  }
+    const config: Config = parsedConfig;
 
-  await writeReleasesData(config.jsonFilePath, releasesData);
-  console.log("Releases data saved.");
+    // Ensure the directory for the JSON file exists
+    const jsonDir = path.dirname(config.jsonFilePath);
+    await fs.mkdir(jsonDir, { recursive: true });
+
+    const releasesData = await readReleasesData(config.jsonFilePath);
+
+    for (const repo of config.repos) {
+      try {
+        const url = `https://github.com/${repo}/releases.atom`;
+        const response = await axios.get(url);
+        const releases = await parseRss(response.data);
+
+        // Sort releases by published date in descending order (newest first)
+        releases.sort((a, b) => new Date(b.published).getTime() - new Date(a.published).getTime());
+
+        // Process only the latest release
+        if (releases.length > 0) {
+          const latestRelease = releases[0];
+          // Only update if the latest release is different from the one already stored
+          if (!releasesData[repo] || releasesData[repo].id !== latestRelease.id) {
+            releasesData[repo] = latestRelease;
+            await sendNotification(config, repo, latestRelease);
+          }
+        }
+      } catch (error) {
+        console.error(`Error processing repo ${repo}:`, error);
+      }
+    }
+
+    await writeReleasesData(config.jsonFilePath, releasesData);
+    console.log("Releases data saved.");
+  } catch (error: unknown) {
+    if (isNodeError(error) && error.code === 'ENOENT') {
+      console.error(`Error: Config file not found at ${CONFIG_PATH}. Please create one based on config.example.yaml.`);
+    } else if (error instanceof Error) {
+      console.error(`An unexpected error occurred: ${error.message}`);
+    } else {
+      console.error(`An unknown error occurred: ${error}`);
+    }
+    process.exit(1); // Exit with an error code
+  }
 }
 
 async function parseRss(rss: string): Promise<Release[]> {
