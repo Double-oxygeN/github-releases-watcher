@@ -1,6 +1,8 @@
 repos:
-  - "microsoft/vscode"
-  - "facebook/react"
+  "microsoft/vscode":
+    pattern: "^[A-Za-z]+ [0-9]+$"
+  "facebook/react":
+    pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+"
 
 mail:
   host: "your.smtp.host"

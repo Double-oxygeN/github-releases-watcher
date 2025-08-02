@@ -33,8 +33,12 @@ interface MailOptions {
   to: string;
 }
 
+interface RepoConfig {
+  pattern?: string;
+}
+
 interface Config {
-  repos: string[];
+  repos: Record<string, RepoConfig>;
   mail: MailOptions;
   jsonFilePath: string;
 }
@@ -49,6 +53,8 @@ interface Release {
 interface ReleasesData {
   [repo: string]: Release;
 }
+
+const regexCache: Record<string, RegExp> = {};
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return typeof error === 'object' && error !== null && 'code' in error;
@@ -70,12 +76,34 @@ function isMailOptions(obj: unknown): obj is MailOptions {
   );
 }
 
+function isValidPattern(pattern: string): boolean {
+  if (pattern in regexCache) {
+    return true; // Already validated and cached
+  }
+
+  try {
+    const regex = new RegExp(pattern);
+    regexCache[pattern] = regex;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isRepoConfig(obj: unknown): obj is RepoConfig {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const repoConfig = obj as Partial<RepoConfig>;
+  return repoConfig.pattern === undefined || (typeof repoConfig.pattern === 'string' && isValidPattern(repoConfig.pattern));
+}
+
 function isConfig(obj: unknown): obj is Config {
   if (typeof obj !== 'object' || obj === null) return false;
   const config = obj as Partial<Config>;
   return (
-    Array.isArray(config.repos) &&
-    config.repos.every(repo => typeof repo === 'string') &&
+    typeof config.repos === 'object' &&
+    config.repos !== null &&
+    !Array.isArray(config.repos) &&
+    Object.values(config.repos).every(isRepoConfig) &&
     isMailOptions(config.mail) &&
     typeof config.jsonFilePath === 'string'
   );
@@ -112,7 +140,7 @@ async function main() {
 
     const releasesData = await readReleasesData(config.jsonFilePath);
 
-    for (const repo of config.repos) {
+    for (const [repo, repoConfig] of Object.entries(config.repos)) {
       try {
         const url = `https://github.com/${repo}/releases.atom`;
         const response = await axios.get(url);
@@ -127,7 +155,14 @@ async function main() {
           // Only update if the latest release is different from the one already stored
           if (!releasesData[repo] || releasesData[repo].id !== latestRelease.id) {
             releasesData[repo] = latestRelease;
-            await sendNotification(config, repo, latestRelease);
+
+            const shouldSendNotification = shouldNotifyRelease(repoConfig, latestRelease);
+
+            if (shouldSendNotification) {
+              await sendNotification(config, repo, latestRelease);
+            } else {
+              console.log(`Release "${latestRelease.title}" for ${repo} does not match the repo's notification criteria, notification skipped.`);
+            }
           }
         }
       } catch (error) {
@@ -159,6 +194,21 @@ async function parseRss(rss: string): Promise<Release[]> {
     link: item.link || '',
     published: item.pubDate || '',
   }));
+}
+
+function shouldNotifyRelease(repoConfig: RepoConfig, release: Release): boolean {
+  if (!repoConfig.pattern) {
+    return true; // No pattern means all releases should trigger notifications
+  }
+
+  if (repoConfig.pattern in regexCache) {
+    return regexCache[repoConfig.pattern].test(release.title);
+  }
+
+  // Fallback: should not happen if config validation is correct
+  const regex = new RegExp(repoConfig.pattern);
+  regexCache[repoConfig.pattern] = regex;
+  return regex.test(release.title);
 }
 
 async function sendNotification(config: Config, repo: string, release: Release) {
