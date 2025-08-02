@@ -8,6 +8,7 @@ GitHub Releases Watcher is a simple Node.js application that monitors specified 
 - Sends email notifications for new releases.
 - Stores the latest release information per repository in a local JSON file.
 - Easy to configure via a YAML file.
+- **Pattern filtering**: Configure regex patterns to filter which releases trigger notifications while still tracking all releases.
 
 ## Prerequisites
 
@@ -45,6 +46,35 @@ Before you begin, ensure you have the following installed:
 
     Open `config.yaml` in your text editor and fill in the details.
 
+### Repository Configuration
+
+You can configure repositories in two ways:
+
+#### Basic Configuration (All releases trigger notifications)
+
+```yaml
+repos:
+  "owner/repository": {}
+```
+
+#### Advanced Configuration with Pattern Filtering
+
+```yaml
+repos:
+  "microsoft/vscode":
+    pattern: "^[A-Za-z]+ [0-9]+$"  # Only releases like "January 2024"
+  "facebook/react":
+    pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+"  # Semantic versioning like "18.2.0 (June 14, 2022)"
+  "other/repo": {}  # No pattern - all releases trigger notifications
+```
+
+**Pattern Behavior:**
+
+- When a `pattern` is specified, only releases whose titles match the regex pattern will trigger email notifications
+- All releases (matching or not) are still saved to the JSON file and logged
+- If no `pattern` is specified, all releases trigger notifications (backward compatible behavior)
+- Use double backslashes (`\\`) to escape regex special characters in YAML
+
 > [!IMPORTANT]
 > `config.yaml` is ignored by Git (via `.gitignore`) to prevent sensitive information (like email passwords) from being committed to your repository.
 
@@ -60,8 +90,9 @@ This will:
 
 1. Read your `config.yaml`.
 2. Check for new releases for each configured repository.
-3. Send an email notification if a new release is found (only the latest one per repository).
-4. Update the `data/releases.json` file with the latest release information.
+3. Send an email notification if a new release is found and matches the configured pattern (if any).
+4. Update the `data/releases.json` file with the latest release information (regardless of pattern matching).
+5. Log any releases that don't match the pattern but were still tracked.
 
 ## Development
 
