@@ -72,7 +72,7 @@ repos:
 
 - When a `pattern` is specified, only releases whose titles match the regex pattern will trigger email notifications
 - All releases (matching or not) are still saved to the JSON file and logged
-- If no `pattern` is specified, all releases trigger notifications (backward compatible behavior)
+- If no `pattern` is specified, all releases trigger notifications
 - Use double backslashes (`\\`) to escape regex special characters in YAML
 
 > [!IMPORTANT]
